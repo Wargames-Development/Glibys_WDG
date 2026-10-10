@@ -85,9 +85,13 @@ public class UDPVoiceClientHandler implements Runnable {
 			} else {
 				synchronized (this) {
 					try {
-						this.wait();
-					} catch (final InterruptedException e) {
-						e.printStackTrace();
+						// Bounded wait prevents a missed wake-up from keeping this worker alive.
+						this.wait(250L);
+					} catch (final InterruptedException interrupted) {
+						// stop() interrupts this worker when disconnecting.
+						if (!UDPVoiceClient.running) return;
+						Thread.currentThread().interrupt();
+						return;
 					}
 				}
 			}

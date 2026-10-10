@@ -1,0 +1,33 @@
+# IDEs
+/.idea/
+/.vscode/
+/*.iml
+/*.ipr
+/*.iws
+/.classpath
+/.project
+/.settings/
+/bin/
+/out/
+/eclipse/
+
+# Gradle / generated runtime
+/.gradle/
+/build/
+/run/
+/*.launch
+!gradle/wrapper/gradle-wrapper.jar
+
+# Local development
+*.log
+*.tmp
+*.bak
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Downloaded/release archives; do not ignore tracked binary wrapper
+*.zip
+*.jar
+!gradle/wrapper/gradle-wrapper.jar

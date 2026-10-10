@@ -33,6 +33,7 @@ public class UDPVoiceClient extends VoiceAuthenticatedClient {
 	private final ClientStreamManager soundManager;
 
 	private UDPVoiceClientHandler handler;
+	private volatile Thread packetHandlerThread;
 	private DatagramSocket datagramSocket;
 	private InetSocketAddress address;
 	public int key;
@@ -110,7 +111,11 @@ public class UDPVoiceClient extends VoiceAuthenticatedClient {
 			datagramSocket = new DatagramSocket();
 			datagramSocket.setSoTimeout(0);
 			datagramSocket.connect(address);
-			new Thread(handler = new UDPVoiceClientHandler(this), "UDP Voice Client Process").start();
+			handler = new UDPVoiceClientHandler(this);
+			final Thread packetWorker = new Thread(handler, "UDP Voice Client Process");
+			packetWorker.setDaemon(true);
+			packetHandlerThread = packetWorker;
+			packetWorker.start();
 		} catch (final SocketException e) {
 			running = false;
 			e.printStackTrace();
@@ -127,7 +132,8 @@ public class UDPVoiceClient extends VoiceAuthenticatedClient {
 					handler.notify();
 				}
 			} catch (final IOException e) {
-				e.printStackTrace();
+				// Closing the socket is the expected path when leaving a world.
+				if (running) e.printStackTrace();
 			}
 		}
 	}
@@ -136,5 +142,13 @@ public class UDPVoiceClient extends VoiceAuthenticatedClient {
 	public void stop() {
 		running = false;
 		if (datagramSocket != null) datagramSocket.close();
+		final Thread packetWorker = packetHandlerThread;
+		if (packetWorker != null) packetWorker.interrupt();
+		final UDPVoiceClientHandler packetHandler = handler;
+		if (packetHandler != null) {
+			synchronized (packetHandler) {
+				packetHandler.notifyAll();
+			}
+		}
 	}
 }

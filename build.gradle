@@ -1,68 +1,104 @@
+// Gliby's Voice Chat WDG — WGCore-aligned Forge 1.7.10 build.
+// Keep protocol/mod ID and upstream runtime version unchanged for compatibility.
+import java.util.Properties
+
 buildscript {
     repositories {
+        maven { url = 'https://maven.minecraftforge.net/' }
         mavenCentral()
-        maven {
-            name = "forge"
-            url = "http://files.minecraftforge.net/maven"
-        }
-        maven {
-            name = "sonatype"
-            url = "https://oss.sonatype.org/content/repositories/snapshots/"
-        }
     }
     dependencies {
-        classpath 'net.minecraftforge.gradle:ForgeGradle:1.2-SNAPSHOT'
+        classpath('com.anatawa12.forge:ForgeGradle:1.2-1.0.+') { changing = true }
     }
 }
 
 apply plugin: 'forge'
-//STUFF THAT MATTERS! >>>>>>>>>
 
-version = "1.7.10-0.6.1"
-group= "net.gliby"
-archivesBaseName = "GlibysVC"
+group = 'net.gliby'
+archivesBaseName = jarBaseName
+
+def mcVersion = '1.7.10'
+def forgeVersion = "${mcVersion}-10.13.4.1614-1.7.10"
+def propsFile = file('gradle.properties')
+def persistedProps = new Properties()
+propsFile.withInputStream { persistedProps.load(it) }
+def currentBuildNumber = (persistedProps.getProperty('modBuildNumber') ?: '0').toInteger()
+def requestedTasks = gradle.startParameter.taskNames.collect { it.toLowerCase() }
+def shouldAutoIncrement = requestedTasks.isEmpty() || requestedTasks.any { taskName ->
+    taskName == 'build' || taskName.endsWith(':build') ||
+    taskName == 'assemble' || taskName.endsWith(':assemble') ||
+    taskName == 'reobf' || taskName.endsWith(':reobf') ||
+    taskName == 'jar' || taskName.endsWith(':jar')
+}
+def effectiveBuildNumber = shouldAutoIncrement ? currentBuildNumber + 1 : currentBuildNumber
+def baseVersion = "${modMainVersion}.${modSubVersion}.${modPatchVersion}_X${effectiveBuildNumber}"
+def branchSuffix = (project.hasProperty('branch') && project.branch) ? "-${project.branch}" : ''
+def modVersionString = "${baseVersion}${branchSuffix}"
+version = modVersionString
+
+compileJava.options.encoding = 'UTF-8'
+sourceCompatibility = targetCompatibility = '1.8'
 
 minecraft {
-    version = "1.7.10-10.13.2.1291"
-    runDir = "eclipse"
+    version = forgeVersion
+    runDir = 'eclipse'
 }
+
+repositories {
+    // Gliby's upstream uses org.xiph.speex classes from JSpeex 0.9.7.
+    // The artifact is published without a normal POM; @jar resolves the JAR directly.
+    maven { url = 'https://repository.jboss.org/maven2/' }
+    mavenCentral()
+}
+
+configurations { codecBundle }
 
 dependencies {
-	compile files('lib/jspeex.jar')
+    compile 'org.mobicents.external.jspeex:jspeex:0.9.7@jar'
+    codecBundle 'org.mobicents.external.jspeex:jspeex:0.9.7@jar'
 }
 
-//NOPE DOESN'T MATTER ANYMORE! <<<<<<<
-
-
-processResources
-{
-    // this will ensure that this task is redone when the versions change.
-    inputs.property "version", project.version
-    inputs.property "mcversion", project.minecraft.version
-
-    // replace stuff in mcmod.info, nothing else
+processResources {
+    inputs.property 'version', modVersionString
+    inputs.property 'mcversion', mcVersion
     from(sourceSets.main.resources.srcDirs) {
         include 'mcmod.info'
-                
-        // replace version and mcversion
-        expand 'version':project.version, 'mcversion':project.minecraft.version
+        expand([mcversion: mcVersion])
     }
-        
-    // copy everything else, thats not the mcmod.info
-    from(sourceSets.main.resources.srcDirs) {
-        exclude 'mcmod.info'
-    }
-	//non-idiomatic way to extract lib/jspeex.jar into archives
-	def zipFile = file('lib/jspeex.jar')
-    def outputDir = file("${buildDir}/unpacked/dist")
-
-    from zipTree(zipFile)
-    into outputDir
-	
+    from(sourceSets.main.resources.srcDirs) { exclude 'mcmod.info' }
 }
 
 jar {
-	manifest {
-		attributes 'FMLAT' : 'gvc_at.cfg'
-	}
+    def fullVersion = "${modMainVersion}.${modSubVersion}.${modPatchVersion}_X${effectiveBuildNumber}"
+    def suffix = (project.hasProperty('branch') && project.branch) ? "-${project.branch}" : ''
+    baseName = "${jarBaseName}-${fullVersion}${suffix}"
+    version = null
+    destinationDir = file('build/libs')
+
+    manifest { attributes 'FMLAT': 'gvc_at.cfg' }
+
+    // Include ONLY the codec classes; do not overwrite the mod manifest or AT.
+    from({ configurations.codecBundle.collect { zipTree(it) } }) {
+        include 'org/xiph/speex/**'
+    }
+    from('LICENSE-SPEEX') {
+        into 'META-INF/licenses'
+        rename { 'LICENSE-SPEEX.txt' }
+    }
+}
+
+task persistBuildNumber {
+    onlyIf { shouldAutoIncrement }
+    doLast {
+        def updatedProps = new Properties()
+        propsFile.withInputStream { updatedProps.load(it) }
+        updatedProps.setProperty('modBuildNumber', String.valueOf(effectiveBuildNumber))
+        propsFile.withOutputStream { output -> updatedProps.store(output, null) }
+        println "Gliby's WDG build number: X${currentBuildNumber} -> X${effectiveBuildNumber}"
+    }
+}
+if (shouldAutoIncrement) {
+    tasks.matching { it.name in ['build','assemble','reobf','jar'] }.all { task ->
+        task.dependsOn persistBuildNumber
+    }
 }

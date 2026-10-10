@@ -61,7 +61,7 @@ public class ClientNetwork {
 	}
 
 
-	public VoiceClient startClientNetwork(EnumVoiceNetworkType type, String hash, String ip, int udpPort, int soundDist, int bufferSize, int soundQualityMin, int soundQualityMax, boolean showVoicePlates, boolean showVoiceIcons) {
+	public synchronized VoiceClient startClientNetwork(EnumVoiceNetworkType type, String hash, String ip, int udpPort, int soundDist, int bufferSize, int soundQualityMin, int soundQualityMax, boolean showVoicePlates, boolean showVoiceIcons) {
 		this.voiceChat.getSettings().resetQuality();
 		if (connected) stopClientNetwork();
 		VoiceChatClient.getSoundManager().reset();
@@ -97,14 +97,30 @@ public class ClientNetwork {
 		return voiceClient;
 	}
 
-	public void stopClientNetwork() {
+	/** Stop voice networking cooperatively; Thread.stop() is unsupported on Java 21. */
+	public synchronized void stopClientNetwork() {
 		connected = false;
-		VoiceChatClient.getSoundManager().reset();
-		if (voiceClient != null) {
-			voiceClient.stop();
+		final VoiceClient client = voiceClient;
+		final Thread worker = voiceClientThread;
+
+		if (VoiceChatClient.getSoundManager() != null) {
+			VoiceChatClient.getSoundManager().reset();
+		}
+		if (client != null) {
+			client.stop();
 			VoiceChatClient.getLogger().info("Stopped Voice Client.");
 		}
-		if (voiceClientThread != null) voiceClientThread.stop();
+		if (worker != null && worker != Thread.currentThread() && worker.isAlive()) {
+			worker.interrupt();
+			try {
+				worker.join(250L);
+			} catch (InterruptedException interrupted) {
+				Thread.currentThread().interrupt();
+			}
+			if (worker.isAlive()) {
+				VoiceChatClient.getLogger().warn("Voice client thread did not exit within 250 ms.");
+			}
+		}
 		voiceClient = null;
 		voiceClientThread = null;
 	}

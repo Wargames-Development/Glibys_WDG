@@ -190,12 +190,40 @@ public class VoiceChatServer {
 		return thread;
 	}
 
-	public void stop() {
-		serverNetwork.stop();
-		if (voiceServer instanceof VoiceAuthenticatedServer) ((VoiceAuthenticatedServer) voiceServer).waitingAuth.clear();
-		voiceServer.stop();
-		voiceServer = null;
-		voiceServerThread.stop();
+	/** Stop the integrated/dedicated voice server without using the removed Thread.stop(). */
+	public synchronized void stop() {
+		final ServerNetwork network = this.serverNetwork;
+		final VoiceServer server = this.voiceServer;
+		final Thread worker = this.voiceServerThread;
+
+		// Repeated server-stopped events must be safe (including failed starts).
+		if (network == null && server == null && worker == null) return;
+
+		if (network != null) network.stop();
+		if (server != null) {
+			if (server instanceof VoiceAuthenticatedServer) {
+				((VoiceAuthenticatedServer) server).waitingAuth.clear();
+			}
+			server.stop();
+		}
+
+		// VoiceServer.run() normally terminates as soon as start() returns.
+		// If startup is still running, request cooperative cancellation.
+		if (worker != null && worker != Thread.currentThread() && worker.isAlive()) {
+			worker.interrupt();
+			try {
+				worker.join(250L);
+			} catch (InterruptedException interrupted) {
+				Thread.currentThread().interrupt();
+			}
+			if (worker.isAlive()) {
+				LOGGER.warn("Voice server startup thread did not exit within 250 ms during shutdown.");
+			}
+		}
+
+		this.voiceServer = null;
+		this.voiceServerThread = null;
+		this.serverNetwork = null;
 	}
 
 	/**
